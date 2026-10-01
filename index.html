@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CoR MR · Portraits vivants v2</title>
+  <title>CoR MR · Portraits vivants v3</title>
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <style>
     body { margin: 0; overflow: hidden; font-family: -apple-system, system-ui, sans-serif; background: #000; }
@@ -17,21 +17,39 @@
     #hud strong { color: #FFCC00; font-size: 15px; }
     #hud kbd { background: #FFCC00; color: #003399; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-family: inherit; font-size: 11px; }
     #hud.hidden { display: none; }
+    #enterMR {
+      position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+      background: #FFCC00; color: #003399; border: none;
+      padding: 20px 40px; border-radius: 50px; font-size: 18px; font-weight: bold;
+      cursor: pointer; z-index: 999;
+      box-shadow: 0 4px 20px rgba(255, 204, 0, 0.5);
+      font-family: inherit;
+    }
+    #enterMR:hover { background: #FFD633; transform: translateX(-50%) scale(1.05); }
+    #enterMR.hidden { display: none; }
+    #errorMsg {
+      position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+      background: #FF4466; color: #fff; padding: 14px 24px; border-radius: 10px;
+      font-size: 13px; max-width: 80%; text-align: center; display: none; z-index: 999;
+    }
   </style>
 </head>
 <body>
 
 <div id="hud">
   <strong>Portraits vivants — mode terrain</strong><br>
-  Ouvre dans Meta Browser (Quest 3), entre en MR via le bouton doré.<br>
-  <kbd>Gâchette D</kbd> pose le prochain portrait de la liste · <kbd>A</kbd> efface le dernier · <kbd>B</kbd> sauve · <kbd>X</kbd> recharge
+  Ouvre dans Meta Browser (Quest 3), puis clique sur <strong style="color:#FFCC00">ENTRER EN MR</strong> ci-dessous.<br>
+  <kbd>Gâchette D</kbd> pose le prochain portrait · <kbd>A</kbd> efface · <kbd>B</kbd> sauve · <kbd>X</kbd> recharge
 </div>
+
+<button id="enterMR">▶ ENTRER EN MR (passthrough)</button>
+<div id="errorMsg"></div>
 
 <a-scene
   webxr="requiredFeatures: local-floor; optionalFeatures: hit-test, anchors, hand-tracking"
   renderer="colorManagement: true; alpha: true; antialias: true; toneMapping: ACESFilmic; exposure: 1.1"
   background="transparent: true"
-  vr-mode-ui="enabled: true">
+  vr-mode-ui="enabled: false">
 
   <a-light type="ambient" intensity="0.5"></a-light>
   <a-light type="directional" position="0 4 2" intensity="0.5"></a-light>
@@ -72,16 +90,20 @@
   //
   const PORTRAITS = [
     {
-      title: "Katta Tutto",
-      image: "./portraits/tutto.jpg",
-      audio: "./audio/tutto.mp3"
+      title: "Jacques Delors",
+      image: "./portraits/delors.jpg",
+      audio: "./audio/delors.mp3"
     },
     {
-      title: "Manfred Dammeyer",
-      image: "./portraits/dammeyer.jpg",
-      audio: "./audio/dammeyer.mp3"
+      title: "Simone Veil",
+      image: "./portraits/veil.jpg",
+      audio: "./audio/veil.mp3"
     },
-
+    {
+      title: "Robert Schuman",
+      image: "./portraits/schuman.jpg",
+      audio: "./audio/schuman.mp3"
+    }
     // Ajoute d'autres portraits ici si tu veux
   ];
   //
@@ -233,9 +255,44 @@
   rightHand.addEventListener('bbuttondown', save);
   leftHand.addEventListener('xbuttondown', load);
 
+  // ---------- Bouton MR custom : force immersive-ar ----------
+  const enterBtn = document.getElementById('enterMR');
+  const errorMsg = document.getElementById('errorMsg');
+
+  async function enterMR() {
+    if (!navigator.xr) {
+      showError("WebXR non disponible — ouvre cette page dans Meta Browser sur le Quest 3.");
+      return;
+    }
+    const supported = await navigator.xr.isSessionSupported('immersive-ar');
+    if (!supported) {
+      showError("Mode AR non supporté par ce navigateur. Ouvre dans Meta Browser sur Quest 3.");
+      return;
+    }
+    try {
+      await scene.enterAR();
+    } catch (e) {
+      showError("Impossible d'entrer en MR : " + e.message);
+    }
+  }
+
+  function showError(msg) {
+    errorMsg.textContent = msg;
+    errorMsg.style.display = 'block';
+    setTimeout(() => { errorMsg.style.display = 'none'; }, 6000);
+  }
+
+  enterBtn.addEventListener('click', enterMR);
+
   // ---------- HUD ----------
-  scene.addEventListener('enter-vr', () => hud.classList.add('hidden'));
-  scene.addEventListener('exit-vr', () => hud.classList.remove('hidden'));
+  scene.addEventListener('enter-vr', () => {
+    hud.classList.add('hidden');
+    enterBtn.classList.add('hidden');
+  });
+  scene.addEventListener('exit-vr', () => {
+    hud.classList.remove('hidden');
+    enterBtn.classList.remove('hidden');
+  });
 
   // ---------- Proximité : active halo + joue audio ----------
   AFRAME.registerComponent('proximity-check', {
