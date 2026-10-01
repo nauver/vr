@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CoR MR · Portraits vivants v2</title>
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <style>
+    body { margin: 0; overflow: hidden; font-family: -apple-system, system-ui, sans-serif; background: #000; }
+    #hud {
+      position: fixed; top: 20px; left: 20px; right: 20px;
+      background: rgba(0, 51, 153, 0.92); color: #fff;
+      padding: 16px 20px; border-radius: 14px; z-index: 999;
+      font-size: 13px; line-height: 1.55;
+      backdrop-filter: blur(8px);
+    }
+    #hud strong { color: #FFCC00; font-size: 15px; }
+    #hud kbd { background: #FFCC00; color: #003399; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-family: inherit; font-size: 11px; }
+    #hud.hidden { display: none; }
+  </style>
+</head>
+<body>
+
+<div id="hud">
+  <strong>Portraits vivants — mode terrain</strong><br>
+  Ouvre dans Meta Browser (Quest 3), entre en MR via le bouton doré.<br>
+  <kbd>Gâchette D</kbd> pose le prochain portrait de la liste · <kbd>A</kbd> efface le dernier · <kbd>B</kbd> sauve · <kbd>X</kbd> recharge
+</div>
+
+<a-scene
+  webxr="requiredFeatures: local-floor; optionalFeatures: hit-test, anchors, hand-tracking"
+  renderer="colorManagement: true; alpha: true; antialias: true; toneMapping: ACESFilmic; exposure: 1.1"
+  background="transparent: true"
+  vr-mode-ui="enabled: true">
+
+  <a-light type="ambient" intensity="0.5"></a-light>
+  <a-light type="directional" position="0 4 2" intensity="0.5"></a-light>
+
+  <a-entity id="rig">
+    <a-camera id="cam" position="0 1.6 0" wasd-controls-enabled="false"></a-camera>
+    <a-entity id="leftHand" oculus-touch-controls="hand: left"></a-entity>
+    <a-entity id="rightHand" oculus-touch-controls="hand: right">
+      <a-entity line="start: 0 0 0; end: 0 0 -2; color: #FFCC00; opacity: 0.7"></a-entity>
+      <a-entity id="ghost" position="0 0 -2">
+        <a-plane width="0.44" height="0.60"
+          material="color: #FFCC00; emissive: #FFCC00; emissiveIntensity: 0.5; opacity: 0.28; transparent: true; side: double"></a-plane>
+        <a-plane width="0.47" height="0.63" position="0 0 -0.002"
+          material="color: #FFCC00; emissive: #FFCC00; emissiveIntensity: 0.9; opacity: 0.15; transparent: true; side: double"></a-plane>
+      </a-entity>
+    </a-entity>
+  </a-entity>
+
+  <a-entity id="portraits"></a-entity>
+
+</a-scene>
+
+<script>
+
+  // =====================================================================
+  //  ⬇⬇⬇  LA SEULE ZONE À MODIFIER  ⬇⬇⬇
+  // =====================================================================
+  //
+  //  Liste les portraits dans l'ORDRE où tu veux les poser.
+  //  Chaque gâchette droite consomme la prochaine entrée.
+  //
+  //  Mets tes vrais fichiers dans :
+  //     /portraits/*.jpg   (photos des tableaux prises à l'iPhone)
+  //     /audio/*.mp3       (narrations ElevenLabs, optionnel)
+  //
+  //  Les chemins sont RELATIFS (./) pour que ça marche aussi bien sur
+  //  Netlify (racine) que sur GitHub Pages (sous-dossier /repo/).
+  //
+  const PORTRAITS = [
+    {
+      title: "Katta Tutto",
+      image: "./portraits/tutto.jpg",
+      audio: "./audio/tutto.mp3"
+    },
+    {
+      title: "Manfred Dammeyer",
+      image: "./portraits/dammeyer.jpg",
+      audio: "./audio/dammeyer.mp3"
+    },
+
+    // Ajoute d'autres portraits ici si tu veux
+  ];
+  //
+  // =====================================================================
+
+  const scene = document.querySelector('a-scene');
+  const rightHand = document.getElementById('rightHand');
+  const leftHand = document.getElementById('leftHand');
+  const ghost = document.getElementById('ghost');
+  const portraitsContainer = document.getElementById('portraits');
+  const hud = document.getElementById('hud');
+  const cam = document.getElementById('cam');
+
+  const STORAGE_KEY = 'cor-portraits-v2';
+  const PROXIMITY_ON = 1.2;
+  const PROXIMITY_OFF = 1.5;
+
+  let portraits = [];   // portraits effectivement posés dans la scène
+  let nextIndex = 0;    // prochain élément de PORTRAITS à poser
+
+  // ---------- Création d'un portrait ----------
+  function createPortrait(pos, quat, portraitData) {
+    const wrapper = document.createElement('a-entity');
+    wrapper.setAttribute('position', `${pos.x} ${pos.y} ${pos.z}`);
+    wrapper.addEventListener('loaded', () => {
+      wrapper.object3D.quaternion.set(quat.x, quat.y, quat.z, quat.w);
+    });
+
+    // Cadre doré
+    const frame = document.createElement('a-plane');
+    frame.setAttribute('width', 0.47);
+    frame.setAttribute('height', 0.63);
+    frame.setAttribute('position', '0 0 -0.003');
+    frame.setAttribute('material', 'color: #FFCC00; emissive: #FFCC00; emissiveIntensity: 1.0; side: double; roughness: 0.3; metalness: 0.7');
+    wrapper.appendChild(frame);
+
+    // Image du portrait — on charge directement par URL, plus besoin d'ID
+    const img = document.createElement('a-plane');
+    img.setAttribute('width', 0.4);
+    img.setAttribute('height', 0.55);
+    img.setAttribute('material', `src: url(${portraitData.image}); shader: flat; side: double`);
+    wrapper.appendChild(img);
+
+    // Étiquette
+    const label = document.createElement('a-text');
+    label.setAttribute('value', portraitData.title);
+    label.setAttribute('position', '0 -0.42 0');
+    label.setAttribute('align', 'center');
+    label.setAttribute('color', '#FFCC00');
+    label.setAttribute('width', 1.8);
+    wrapper.appendChild(label);
+
+    // Halo d'activation
+    const halo = document.createElement('a-sphere');
+    halo.setAttribute('radius', 0.55);
+    halo.setAttribute('material', 'color: #FFCC00; emissive: #FFCC00; emissiveIntensity: 1.4; opacity: 0; transparent: true; side: back');
+    wrapper.appendChild(halo);
+
+    // Objet audio préparé mais non joué
+    let audio = null;
+    if (portraitData.audio) {
+      audio = new Audio(portraitData.audio);
+      audio.preload = 'auto';
+    }
+
+    portraitsContainer.appendChild(wrapper);
+
+    portraits.push({
+      el: wrapper, halo, audio,
+      title: portraitData.title,
+      image: portraitData.image,
+      position: { ...pos },
+      quaternion: { x: quat.x, y: quat.y, z: quat.z, w: quat.w },
+      active: false
+    });
+  }
+
+  // ---------- Pose le prochain portrait de la liste à la position du fantôme ----------
+  function placePortraitAtGhost() {
+    if (nextIndex >= PORTRAITS.length) {
+      flashConfirmation('#FF4466');   // flash rouge = plus rien à poser
+      return;
+    }
+    const worldPos = new THREE.Vector3();
+    const worldQuat = new THREE.Quaternion();
+    ghost.object3D.getWorldPosition(worldPos);
+    ghost.object3D.getWorldQuaternion(worldQuat);
+
+    createPortrait(
+      { x: worldPos.x, y: worldPos.y, z: worldPos.z },
+      { x: worldQuat.x, y: worldQuat.y, z: worldQuat.z, w: worldQuat.w },
+      PORTRAITS[nextIndex]
+    );
+    nextIndex++;
+  }
+
+  // ---------- Sauvegarde / rechargement ----------
+  function save() {
+    const data = portraits.map(p => ({
+      position: p.position,
+      quaternion: p.quaternion,
+      title: p.title,
+      image: p.image
+    }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    flashConfirmation('#00FF88');
+  }
+
+  function load() {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    portraits.forEach(p => p.el.remove());
+    portraits = [];
+    nextIndex = 0;
+    try {
+      const data = JSON.parse(raw);
+      data.forEach(p => {
+        // Retrouve l'entrée originale (pour l'audio) via le titre
+        const original = PORTRAITS.find(x => x.title === p.title) || p;
+        createPortrait(p.position, p.quaternion, original);
+        nextIndex++;
+      });
+      flashConfirmation('#4477FF');
+    } catch (e) { console.error('load failed', e); }
+  }
+
+  function eraseLast() {
+    if (portraits.length === 0) return;
+    portraits.pop().el.remove();
+    nextIndex = Math.max(0, nextIndex - 1);
+    flashConfirmation('#FF4466');
+  }
+
+  function flashConfirmation(color) {
+    const flash = document.createElement('a-entity');
+    flash.setAttribute('geometry', 'primitive: sphere; radius: 8');
+    flash.setAttribute('material', `color: ${color}; opacity: 0.25; transparent: true; side: back`);
+    const camPos = new THREE.Vector3();
+    cam.object3D.getWorldPosition(camPos);
+    flash.setAttribute('position', `${camPos.x} ${camPos.y} ${camPos.z}`);
+    flash.setAttribute('animation', 'property: material.opacity; from: 0.25; to: 0; dur: 350; easing: easeOutQuad');
+    scene.appendChild(flash);
+    setTimeout(() => flash.remove(), 400);
+  }
+
+  // ---------- Boutons ----------
+  rightHand.addEventListener('triggerdown', placePortraitAtGhost);
+  rightHand.addEventListener('abuttondown', eraseLast);
+  rightHand.addEventListener('bbuttondown', save);
+  leftHand.addEventListener('xbuttondown', load);
+
+  // ---------- HUD ----------
+  scene.addEventListener('enter-vr', () => hud.classList.add('hidden'));
+  scene.addEventListener('exit-vr', () => hud.classList.remove('hidden'));
+
+  // ---------- Proximité : active halo + joue audio ----------
+  AFRAME.registerComponent('proximity-check', {
+    tick: function() {
+      if (!cam.object3D) return;
+      const camPos = new THREE.Vector3();
+      cam.object3D.getWorldPosition(camPos);
+      const pPos = new THREE.Vector3();
+
+      portraits.forEach(p => {
+        p.el.object3D.getWorldPosition(pPos);
+        const dist = camPos.distanceTo(pPos);
+
+        if (dist < PROXIMITY_ON && !p.active) {
+          p.active = true;
+          p.halo.setAttribute('animation__on',
+            'property: material.opacity; to: 0.45; dur: 600; easing: easeOutSine');
+          if (p.audio) {
+            p.audio.currentTime = 0;
+            p.audio.play().catch(() => { /* bloqué si pas d'interaction utilisateur, ignorer */ });
+          }
+        } else if (dist > PROXIMITY_OFF && p.active) {
+          p.active = false;
+          p.halo.setAttribute('animation__off',
+            'property: material.opacity; to: 0; dur: 800; easing: easeInSine');
+          if (p.audio) p.audio.pause();
+        }
+      });
+    }
+  });
+
+  scene.setAttribute('proximity-check', '');
+</script>
+
+</body>
+</html>
